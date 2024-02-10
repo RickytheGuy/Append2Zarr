@@ -8,8 +8,8 @@ import numpy as np
 
 # LOG_GROUP_NAME = os.getenv('AWS_LOG_GROUP_NAME')
 # LOG_STREAM_NAME = os.getenv('AWS_LOG_STREAM_NAME')
-ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID') # 'AKIARZCE2HY2F5ZVW22Z'
-SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY') # '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'
+ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID') 
+SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY') 
 REGION = os.getenv('AWS_REGION')
 
 class CloudLog():
