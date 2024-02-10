@@ -14,15 +14,22 @@ from cloud_logger import CloudLog
 logging.basicConfig(level=logging.INFO,
                     filename='log.log',
                     format='%(asctime)s - %(levelname)s - %(message)s')
+S5CMD = 's5cmd'
 
-def inflow_and_namelist(namelist_dir: str,
-                     nc: str,
-                     vpu_dirs: list[str]) -> None:
+def inflow_and_namelist(
+        working_dir: str,
+        namelist_dir: str,
+        nc: str,
+        vpu_dirs: list[str]) -> None:
     for vpu_dir in vpu_dirs:
+        if not os.path.isdir(vpu_dir):
+            continue
         vpu = os.path.basename(vpu_dir)
-        inflow_dir = os.path.join('/home/ubuntu/data/inflows', vpu)
-        output_dir = '/home/ubuntu/data/outputs/' + vpu
+        
+        inflow_dir = os.path.join(working_dir, 'data','inflows', vpu)
+        output_dir = os.path.join(working_dir, 'data','outputs', vpu)
         init = glob.glob(os.path.join(output_dir,'Qfinal*.nc'))[0]
+
 
         create_inflow_file(nc,
                         vpu_dir,
@@ -55,7 +62,7 @@ def get_initial_qinits(s3: s3fs.S3FileSystem,
         {os.remove(f) for f in glob.glob(os.path.join(working_dir, 'data','outputs','*','*Qfinal*.nc'))}
         logging.info('Pulling qfinal files from s3')
         qfinal_files = [sorted([qfinal for qfinal in s3.ls(f'{qfinal_dir}/{os.path.basename(f)}') if 'Qfinal' in qfinal], \
-                               key= lambda x: datetime.datetime.strptime(os.path.basename(x).split('_')[2].split('.')[0], '%Y%m%d'))[-1] for f in vpu_dirs]
+                               key= lambda x: datetime.datetime.strptime(os.path.basename(x).split('_')[2].split('.')[0], '%Y%m%d'))[-1] for f in vpu_dirs if os.path.isdir(f)]
         for s3_file in qfinal_files:
             vpu = os.path.basename(s3_file).split('_')[1]
             os.makedirs(os.path.join(working_dir, 'data','outputs', vpu), exist_ok=True)
@@ -93,9 +100,10 @@ def drop_coords(ds: xr.Dataset, qout: str ='Qout'):
 def upload_to_s3(s3: s3fs.S3FileSystem,
                  file_path: str,
                  s3_path: str) -> None:
-    with open(file_path, 'rb') as f:
-        with s3.open(s3_path, 'wb') as sf:
-            sf.write(f.read())
+    pass
+    # with open(file_path, 'rb') as f:
+    #     with s3.open(s3_path, 'wb') as sf:
+    #         sf.write(f.read())
 
 def cleanup(working_dir: str,
             qfinal_dir: str,
@@ -120,6 +128,7 @@ def sync_local_to_s3(local_zarr: str,
     """
     Embarrassingly fast sync zarr to S3 (~3 minutes for 150k files). Note we only sink neccesarry files: all Qout/1.*, and all . files in the zarr
     """
+    global S5CMD
     # all . files in the top folder (.zgroup, .zmetadata), and all . files in the Qout var (.zarray)
     files_to_upload = glob.glob(os.path.join(local_zarr, '.*')) 
     command = ""
@@ -130,8 +139,8 @@ def sync_local_to_s3(local_zarr: str,
         else:
             # Otherwise, upload to the top-level folder
             destination = s3_zarr
-        command += f"s5cmd cp {f} {destination}\n"
-    command += "s5cmd sync --size-only --include=\"*1.*\" /home/ubuntu/retro_backup/geoglows_v2_retrospective.zarr/Qout s3://geoglows-scratch/retrospective.zarr/Qout/"
+        command += f"{S5CMD} cp {f} {destination}\n"
+    command += f"{S5CMD} sync --size-only --include=\"*1.*\" {local_zarr}/Qout {s3_zarr}/Qout/"
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
 
     # Check if the command was successful
@@ -161,6 +170,7 @@ def check_installations() -> None:
     s5cmd
     docker
     """
+    global S5CMD
     class NotInstalled(Exception):
         pass
     try:
@@ -169,7 +179,17 @@ def check_installations() -> None:
         raise NotInstalled('Please install the AWS cli: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html')
     
     try:
-        subprocess.run(['s5cmd', 'version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run([S5CMD, 'version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except FileNotFoundError as e:
+        S5CMD = os.environ['CONDA_PREFIX']
+        if 'envs' not in S5CMD:
+            S5CMD = os.environ['CONDA_PREFIX_2']
+            if 'envs' not in S5CMD:
+                raise e
+        S5CMD = os.path.join(S5CMD, 'bin','s5cmd')
+        subprocess.run([S5CMD, 'version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+
     except subprocess.CalledProcessError:
         raise NotInstalled('Please install s5cmd: `conda install s5cmd`')
     
@@ -202,7 +222,7 @@ def main(working_dir: str,
     logging.info(f"Using {processes} processes for inflows")
     worker_lists = [config_vpu_dirs[i:i+processes] for i in range(0, len(config_vpu_dirs), processes)]
     with multiprocessing.Pool(processes) as pool:
-        pool.starmap(inflow_and_namelist, [(os.path.join(working_dir, 'data','namelists'), nc, w) for w in worker_lists])
+        pool.starmap(inflow_and_namelist, [(working_dir, os.path.join(working_dir, 'data','namelists'), nc, w) for w in worker_lists])
     
     if len(glob.glob(os.path.join(working_dir, 'data','inflows','*','m3*.nc'))) != 125:
         logging.error('Not all of the m3 files were generated!!!')
@@ -241,8 +261,15 @@ def main(working_dir: str,
         main(working_dir, retro_zarr, qfinal_dir)
     
     # At last, sync to S3
-    sync_local_to_s3(retro_zarr, s3_zarr)
+    #sync_local_to_s3(retro_zarr, s3_zarr)
+    S5CMD
+    result = subprocess.run(f"{S5CMD} cp {retro_zarr} s3://geoglows-scratch", shell=True, capture_output=True, text=True)
 
+    # Check if the command was successful
+    if result.returncode == 0:
+        logging.info("Sync completed successfully.")
+    else:
+        logging.error(f"Sync failed. Error: {result.stderr}")
 
 if __name__ == '__main__':
     start = time.time()
@@ -263,7 +290,7 @@ if __name__ == '__main__':
             logging.error(f"{retro_zarr} does not exist!")
             cl.log_message('Fail', f"{retro_zarr} does not exist!")
             exit()
-        if not os.path.exists(os.patah.join(working_directory, 'data', 'runrapid.py')):
+        if not os.path.exists(os.path.join(working_directory, 'data', 'runrapid.py')):
             msg = f"Please put 'runrapid.py' in {working_directory}/data so that RAPID may use it"
             logging.error(msg)
             cl.log_message('Fail', msg)

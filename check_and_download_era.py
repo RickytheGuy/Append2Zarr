@@ -42,7 +42,7 @@ def download_era5(working_dir: str,
         # since the ECMWF has a lag time of 6 days ish (a week for rounding)
         logging.warning('Script executed too soon! Exiting script...')
         return ('', False)
-    elif pd.to_datetime(last_date + np.timedelta64(21,'D')) > datetime.now():
+    if pd.to_datetime(last_date + np.timedelta64(21,'D')) < datetime.now():
         # If there are more than two weeks of data, we'll need to run again
         run_again = True
 
