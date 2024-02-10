@@ -263,7 +263,7 @@ if __name__ == '__main__':
             logging.error(f"{retro_zarr} does not exist!")
             cl.log_message('Fail', f"{retro_zarr} does not exist!")
             exit()
-        if not os.path.exists(os.patah.join(working_directory, 'data', 'runrapid.py')):
+        if not os.path.exists(os.path.join(working_directory, 'data', 'runrapid.py')):
             msg = f"Please put 'runrapid.py' in {working_directory}/data so that RAPID may use it"
             logging.error(msg)
             cl.log_message('Fail', msg)
