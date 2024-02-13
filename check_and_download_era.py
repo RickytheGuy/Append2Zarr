@@ -87,7 +87,7 @@ def download_era5(working_dir: str,
         
     # Make sure all days were downloaded
     if ds['time'].shape[0] != number_of_days: 
-        raise ValueError('The entire time series was not downloaded correctly... likely ECMWF has not updated their datasets')
+        raise ValueError(f'The entire time series was not downloaded correctly ({ds['time'].shape[0]} of {number_of_days}) likely ECMWF has not updated their datasets')
     
     ds.to_netcdf(os.path.join(working_dir, 'data', 'era5_data', 'era5_hourly_combined.nc'))
 
