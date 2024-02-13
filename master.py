@@ -188,8 +188,6 @@ def check_installations() -> None:
                 raise e
         S5CMD = os.path.join(S5CMD, 'bin','s5cmd')
         subprocess.run([S5CMD, 'version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-
     except subprocess.CalledProcessError:
         raise NotInstalled('Please install s5cmd: `conda install s5cmd`')
     
@@ -249,16 +247,18 @@ def main(working_dir: str,
                         combine='nested', 
                         concat_dim='rivid',
                         preprocess=drop_coords, 
-                        parallel=True) as ds:
+                        parallel=True).reindex(rivid=xr.open_zarr(retro_zarr).rivid) as ds:
 
         append_week(ds, retro_zarr)
+
+    return
 
     if run_again:
         cl.add_message("Succeeded, running again")
         cl.log_message('Pass')
         cl.clear()
         cleanup(working_dir, qfinal_dir)
-        main(working_dir, retro_zarr, qfinal_dir)
+        main(working_dir, retro_zarr, qfinal_dir, s3_zarr)
     
     # At last, sync to S3
     #sync_local_to_s3(retro_zarr, s3_zarr)
@@ -285,6 +285,8 @@ if __name__ == '__main__':
     status = 'Pass'
     error = None
 
+    xr.set_options(engine='h5netcdf')
+
     try:
         if not os.path.exists(retro_zarr):
             logging.error(f"{retro_zarr} does not exist!")
@@ -305,7 +307,7 @@ if __name__ == '__main__':
         error = traceback.format_exc()
         logging.error(error)
         status = 'Fail'
-        cleanup(working_directory, qfinal_dir, True)
+        cleanup(working_directory, qfinal_dir)
     finally:
         logging.info(f'FINISHED: {round((time.time() - start) / 60, 1)} minutes')
         cl.log_message(status, error)

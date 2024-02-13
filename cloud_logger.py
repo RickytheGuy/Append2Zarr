@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 import time
+import logging
 
 import boto3
 import numpy as np
@@ -75,14 +76,18 @@ class CloudLog():
                   }
 
         # Send the log message to CloudWatch
-        response = self.client.put_log_events(
-            logGroupName='AppendWeekLog',
-            logStreamName='EC2',
-            logEvents=[
-                {
-                    'timestamp': int(round(time.time() * 1000)),
-                    'message': json.dumps(log_message)
-                }
-            ]
-        )
+        try:
+            response = self.client.put_log_events(
+                logGroupName='AppendWeekLog',
+                logStreamName='EC2',
+                logEvents=[
+                    {
+                        'timestamp': int(round(time.time() * 1000)),
+                        'message': json.dumps(log_message)
+                    }
+                ]
+            )
+        except Exception as e:
+            logging.error(e)
+
         return response
