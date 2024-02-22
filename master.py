@@ -1,9 +1,11 @@
 import os, glob, subprocess, logging, multiprocessing, datetime, traceback
 
 import xarray as xr
+import pandas as pd
+import numpy as np
 import s3fs
+import boto3
 import psutil
-import time
 
 from generate_namelist import rapid_namelist_from_directories
 from inflow import create_inflow_file
@@ -15,6 +17,9 @@ logging.basicConfig(level=logging.INFO,
                     filename='log.log',
                     format='%(asctime)s - %(levelname)s - %(message)s')
 S5CMD = 's5cmd'
+
+def shutdown() -> None:
+    os.system("sudo shutdown -h now")
 
 def inflow_and_namelist(
         working_dir: str,
@@ -101,9 +106,9 @@ def upload_to_s3(s3: s3fs.S3FileSystem,
                  file_path: str,
                  s3_path: str) -> None:
     pass
-    # with open(file_path, 'rb') as f:
-    #     with s3.open(s3_path, 'wb') as sf:
-    #         sf.write(f.read())
+    with open(file_path, 'rb') as f:
+        with s3.open(s3_path, 'wb') as sf:
+            sf.write(f.read())
 
 def cleanup(working_dir: str,
             qfinal_dir: str,
@@ -111,10 +116,6 @@ def cleanup(working_dir: str,
     # Delete namelists
     for file in glob.glob(os.path.join(working_dir, 'data','namelists', '*')):
         os.remove(file)
-
-    # Delete era5 data
-    for f in glob.glob(os.path.join(working_dir, 'data', 'era5_data', '*.nc')):
-        os.remove(f)
         
     # Delete inflow files
     for f in glob.glob(os.path.join(working_dir, 'data','inflows','*','*.nc')):
@@ -126,11 +127,12 @@ def cleanup(working_dir: str,
 def sync_local_to_s3(local_zarr: str,
                      s3_zarr: str) -> None:
     """
-    Embarrassingly fast sync zarr to S3 (~3 minutes for 150k files). Note we only sink neccesarry files: all Qout/1.*, and all . files in the zarr
+    Embarrassingly fast sync zarr to S3 (~3 minutes for 150k files). 
+    Note we only sink neccesarry files: all Qout/1.*, and all . files in the zarr
     """
     global S5CMD
     # all . files in the top folder (.zgroup, .zmetadata), and all . files in the Qout var (.zarray)
-    files_to_upload = glob.glob(os.path.join(local_zarr, '.*')) 
+    files_to_upload = glob.glob(os.path.join(local_zarr, '.*')) + glob.glob(os.path.join(local_zarr, 'Qout', '.*')) 
     command = ""
     for f in files_to_upload:
         if 'Qout' in f:
@@ -196,22 +198,24 @@ def check_installations() -> None:
     except subprocess.CalledProcessError:
         raise NotInstalled('Please install docker, and run "docker pull chdavid/rapid"')
 
+def run_again(retro_zarr: str) -> bool:
+    try:
+        last_date = xr.open_zarr(retro_zarr)['time'][-1].values
+    except IndexError:
+        last_date = xr.open_zarr(retro_zarr)['time'].values
+    if pd.to_datetime(last_date + np.timedelta64(21,'D')) < datetime.now():
+        # If there are more than two weeks of data, we'll need to run again
+        return True
+    return False
+
 
 def main(working_dir: str,
          retro_zarr: str,
-         qfinal_dir: str,
-         s3_zarr: str) -> None:
+         nc: str) -> None:
     """
     Assumes docker is installed and this command was run: docker pull chdavid/rapid.
     Assumes AWS CLI and s5cmd are likewise installed. 
     """
-    nc, run_again = download_era5(working_dir, retro_zarr, cl)
-    if not nc:
-        return
-    
-    config_vpu_dirs = glob.glob(os.path.join(working_dir, 'data', 'configs', '*'))
-    get_initial_qinits(s3fs.S3FileSystem(), config_vpu_dirs, qfinal_dir, working_dir)
-
     a_qfinal = glob.glob(os.path.join(working_dir, 'data','outputs','*','*Qfinal*.nc'))[0]
     cl.add_qinit(datetime.datetime.strptime(os.path.basename(a_qfinal).split('_')[2].split('.')[0], '%Y%m%d'))
 
@@ -223,8 +227,7 @@ def main(working_dir: str,
         pool.starmap(inflow_and_namelist, [(working_dir, os.path.join(working_dir, 'data','namelists'), nc, w) for w in worker_lists])
     
     if len(glob.glob(os.path.join(working_dir, 'data','inflows','*','m3*.nc'))) != 125:
-        logging.error('Not all of the m3 files were generated!!!')
-        return
+        raise FileNotFoundError('Not all of the m3 files were generated!!!')
 
     # Run rapid
     logging.info('Running rapid')
@@ -238,6 +241,7 @@ def main(working_dir: str,
         class RapidError(Exception):
             pass
         raise RapidError(rapid_result.stderr)
+    
     logging.info(rapid_result.stdout)
         
     # Build the week dataset
@@ -251,64 +255,54 @@ def main(working_dir: str,
 
         append_week(ds, retro_zarr)
 
-    return
-
-    if run_again:
-        cl.add_message("Succeeded, running again")
-        cl.log_message('Pass')
-        cl.clear()
-        cleanup(working_dir, qfinal_dir)
-        main(working_dir, retro_zarr, qfinal_dir, s3_zarr)
-    
-    # At last, sync to S3
-    #sync_local_to_s3(retro_zarr, s3_zarr)
-    S5CMD
-    result = subprocess.run(f"{S5CMD} cp {retro_zarr} s3://geoglows-scratch", shell=True, capture_output=True, text=True)
-
-    # Check if the command was successful
-    if result.returncode == 0:
-        logging.info("Sync completed successfully.")
-    else:
-        logging.error(f"Sync failed. Error: {result.stderr}")
-
 if __name__ == '__main__':
-    start = time.time()
     working_directory = '/home/ubuntu/'
-    # The volume is mounted to this location upon each EC2 startup. To change, modify /etc/fstab
-    #retro_zarr = '/home/ubuntu/retro_backup/geoglows_v2_retrospective.zarr'
-    retro_zarr = '/home/ubuntu/2022_test.zarr' # Local zarr to append to
+    mnt_directory = "/mnt/retro_volume"  # The volume is mounted to this location upon each EC2 startup. To change, modify /etc/fstab
     s3_zarr = 's3://geoglows-scratch/retrospective.zarr' # Zarr located on S3
     qfinal_dir = 's3://geoglows-scratch/retro' # Directory containing subdirectories, containing Qfinal files
     configs_dir = 's3://geoglows-v2/configs' # Directory containing subdirectories, containing the files to run RAPID. Only needed if running this for the first time
-
-    cl = CloudLog()
-    status = 'Pass'
-    error = None
-
-    xr.set_options(engine='h5netcdf')
-
+    era_dir = 's3://geoglows-scrtach/era5_data' # Directory containing the ERA5 data
     try:
+        cl = CloudLog()
+        status = 'Pass'
+        error = None
+        retro_zarr = os.path.join(mnt_directory, '2022_test.zarr') # Local zarr to append to
+        
         if not os.path.exists(retro_zarr):
             logging.error(f"{retro_zarr} does not exist!")
             cl.log_message('Fail', f"{retro_zarr} does not exist!")
-            exit()
+            shutdown()
         if not os.path.exists(os.path.join(working_directory, 'data', 'runrapid.py')):
             msg = f"Please put 'runrapid.py' in {working_directory}/data so that RAPID may use it"
             logging.error(msg)
             cl.log_message('Fail', msg)
-            exit()
+            shutdown()
 
         check_installations()
         setup_configs(working_directory, configs_dir)
         cleanup(working_directory, qfinal_dir)
-        main(working_directory, retro_zarr, qfinal_dir, s3_zarr)
-        cleanup(working_directory, qfinal_dir)
+        config_vpu_dirs = glob.glob(os.path.join(working_directory, 'data', 'configs', '*'))
+        get_initial_qinits(s3fs.S3FileSystem(), config_vpu_dirs, qfinal_dir, working_directory)
+
+
+        s3 = s3fs.S3FileSystem()
+        ncs = s3.glob(f"{era_dir}/*.nc")
+        if not ncs:
+            raise FileNotFoundError(f"Could not find any .nc files in {glob.glob(os.path.join(mnt_directory, 'era5_data'))}")
+        for era_nc in ncs:
+            main(working_directory, retro_zarr, era_nc)
+        
+        # At last, sync to S3
+        sync_local_to_s3(retro_zarr, s3_zarr)
+
+        # Remove ERA5 files from S3
+        # for file_path in ncs:
+        #     s3.rm(file_path)
     except Exception as e:
         error = traceback.format_exc()
         logging.error(error)
         status = 'Fail'
-        cleanup(working_directory, qfinal_dir)
     finally:
-        logging.info(f'FINISHED: {round((time.time() - start) / 60, 1)} minutes')
+        cleanup(working_directory, qfinal_dir)
         cl.log_message(status, error)
-        #os.system("sudo shutdown -h now")
+        shutdown()

@@ -2,7 +2,6 @@ import datetime
 import json
 import os
 import time
-import logging
 
 import boto3
 import numpy as np
@@ -18,12 +17,12 @@ class CloudLog():
     Class made to log messages to AWS Cloudwatch
     """
     def __init__(self, 
-                 
                  ACCESS_KEY_ID = ACCESS_KEY_ID,
                  SECRET_ACCESS_KEY= SECRET_ACCESS_KEY,
                  REGION= REGION,
-                 save_path: str = 'log.json',
+                 save_path: str = 'log.log',
                  ):
+        if not save_path: save_path = 'log.log'
         self.save_path = save_path
         self.start = datetime.datetime.now().ctime()
         self.last_date = None
@@ -64,21 +63,21 @@ class CloudLog():
         self.message = ''
 
 
-    def log_message(self, status: str, error: Exception = None) -> None:
+    def log_message(self, status: str, message: str = None) -> None:
+        if message is not None:
+            self.message = str(message)
         log_message = {'Start time': self.start,
                   'End time':datetime.datetime.now().ctime(),
                   'Status': status,
                   'Message': self.message,
-                  'Error': str(error),
                   'Most recent date in Zarr':self.last_date,
-                  'Qinit used': self.qinit,
                   'Time period': self.time_period
                   }
 
         # Send the log message to CloudWatch
         try:
             response = self.client.put_log_events(
-                logGroupName='AppendWeekLog',
+                logGroupName='ERA_Download',
                 logStreamName='EC2',
                 logEvents=[
                     {
@@ -88,6 +87,7 @@ class CloudLog():
                 ]
             )
         except Exception as e:
-            logging.error(e)
-
-        return response
+            with open(self.save_path, 'w') as f:
+                json.dump(log_message, f, indent=4)
+                f.write('\n')
+                f.write(str(e))
