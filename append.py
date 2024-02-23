@@ -21,6 +21,13 @@ def append_week(week_ds: xr.Dataset,
                  retro_zarr: str) -> None:
     """
     Append an xarray dataset to a zarr file. Option exists to rechunk, not utilized
+    
+    Parameters:
+        week_ds (xr.Dataset): The xarray dataset to be appended.
+        retro_zarr (str): The path to the zarr file to which the dataset will be appended.
+        
+    Returns:
+        None
     """
     begin = time.time()
     with xr.open_zarr(retro_zarr) as retro_ds:
@@ -96,6 +103,16 @@ def append(retro_zarr,
     """
     Add a week to the retro zarr file. If there is only one chunk, this will add a second chunk.
     If there are two chunks, the second chunk is rewritten and expanded.
+
+    Parameters:
+    retro_zarr (str): The path to the retro zarr file.
+    week_ds (xr.Dataset): The dataset containing the week data to be added.
+    chunks (dict): A dictionary specifying the chunk sizes for the time and rivid dimensions.
+    time (str, optional): The name of the time dimension. Defaults to 'time'.
+    rivid (str, optional): The name of the rivid dimension. Defaults to 'rivid'.
+
+    Returns:
+    None
     """
     (
         week_ds

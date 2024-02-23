@@ -19,6 +19,14 @@ logging.basicConfig(level=logging.INFO,
 S5CMD = 's5cmd'
 
 def shutdown() -> None:
+    """
+    Shuts down the system immediately.
+
+    This function executes the 'sudo shutdown -h now' command to initiate an immediate system shutdown.
+
+    Returns:
+        None
+    """
     os.system("sudo shutdown -h now")
 
 def inflow_and_namelist(
@@ -26,6 +34,19 @@ def inflow_and_namelist(
         namelist_dir: str,
         nc: str,
         vpu_dirs: list[str]) -> None:
+    """
+    Generate inflow files and namelist files for each VPU directory.
+
+    Args:
+        working_dir (str): The working directory.
+        namelist_dir (str): The directory to store the namelist files.
+        nc (str): The path to the nc file.
+        vpu_dirs (list[str]): A list of VPU directories.
+
+    Returns:
+        None
+    """
+    
     for vpu_dir in vpu_dirs:
         if not os.path.isdir(vpu_dir):
             continue
@@ -62,7 +83,20 @@ def get_initial_qinits(s3: s3fs.S3FileSystem,
                        working_dir: str,
                        last_retro_time: np.datetime64) -> None:
     """
-    Get q initialization files from S3
+    Get q initialization files from S3.
+
+    Parameters:
+    - s3: An instance of s3fs.S3FileSystem for accessing S3.
+    - vpu_dirs: A list of VPU directories.
+    - qfinal_dir: The directory in S3 where the Qfinal files are stored.
+    - working_dir: The local working directory.
+    - last_retro_time: The last retro time as a numpy datetime64 object.
+
+    Raises:
+    - FileNotFoundError: If the Qfinal files cannot be found or if the number of Qfinal files is not as expected.
+
+    Returns:
+    - None
     """
     last_retro_time: str = np.datetime_as_string(last_retro_time, unit='D').replace('-','')
     local_qfinals = glob.glob(os.path.join(working_dir, 'data','outputs','*','*Qfinal*.nc'))
@@ -87,6 +121,16 @@ def cache_to_s3(s3: s3fs.S3FileSystem,
                 working_dir: str,
                 s3_path: str,
                 delete_all: bool= False) -> None:
+    """
+    Uploads files from the working directory to S3, while optionally deleting some files.
+
+    Args:
+        s3 (s3fs.S3FileSystem): An instance of the S3FileSystem class for S3 access.
+        working_dir (str): The path to the working directory.
+        s3_path (str): The S3 path where the files will be uploaded.
+        delete_all (bool, optional): If True, deletes all qfinal files. Defaults to False.
+    """
+    
     vpu_dirs = glob.glob(os.path.join(working_dir,'data', 'outputs','*'))
     for vpu_dir in vpu_dirs:
         # Delete the earliest qfinal, upload the latest qfinal
@@ -107,12 +151,30 @@ def cache_to_s3(s3: s3fs.S3FileSystem,
 def drop_coords(ds: xr.Dataset, qout: str ='Qout'):
     """
     Helps load faster, gets rid of variables/dimensions we do not need (lat, lon, etc.)
+    
+    Parameters:
+        ds (xr.Dataset): The input dataset.
+        qout (str): The variable name to keep in the dataset.
+        
+    Returns:
+        xr.Dataset: The modified dataset with only the specified variable.
     """
     return ds[[qout]].reset_coords(drop=True)
 
 def upload_to_s3(s3: s3fs.S3FileSystem,
                  file_path: str,
                  s3_path: str) -> None:
+    """
+    Uploads a file to Amazon S3.
+
+    Args:
+        s3 (s3fs.S3FileSystem): The S3FileSystem object used for the upload.
+        file_path (str): The local file path of the file to be uploaded.
+        s3_path (str): The S3 path where the file will be uploaded to.
+
+    Returns:
+        None
+    """
     with open(file_path, 'rb') as f:
         with s3.open(s3_path, 'wb') as sf:
             sf.write(f.read())
@@ -120,12 +182,22 @@ def upload_to_s3(s3: s3fs.S3FileSystem,
 def cleanup(working_dir: str,
             qfinal_dir: str,
             delete_all: bool = False) -> None:
+    """
+    Cleans up the working directory by deleting namelists, inflow files, and
+    caching qfinals and qouts.
+
+    Args:
+        working_dir (str): The path to the working directory.
+        qfinal_dir (str): The path to the qfinal directory.
+        delete_all (bool, optional): If True, deletes all files in the qfinal
+            directory. Defaults to False.
+    """
     # Delete namelists
-    for file in glob.glob(os.path.join(working_dir, 'data','namelists', '*')):
+    for file in glob.glob(os.path.join(working_dir, 'data', 'namelists', '*')):
         os.remove(file)
         
     # Delete inflow files
-    for f in glob.glob(os.path.join(working_dir, 'data','inflows','*','*.nc')):
+    for f in glob.glob(os.path.join(working_dir, 'data', 'inflows', '*', '*.nc')):
         os.remove(f)
 
     # Cache qfinals and qouts, remove
@@ -135,7 +207,14 @@ def sync_local_to_s3(local_zarr: str,
                      s3_zarr: str) -> None:
     """
     Embarrassingly fast sync zarr to S3 (~3 minutes for 150k files). 
-    Note we only sink neccesarry files: all Qout/1.*, and all . files in the zarr
+    Note we only sink necessary files: all Qout/1.*, time/*, and all . files in the zarr
+    
+    Args:
+        local_zarr (str): The local path of the zarr directory.
+        s3_zarr (str): The S3 path where the zarr directory will be synced.
+    
+    Raises:
+        Exception: If the sync command fails.
     """
     global S5CMD
     # all . files in the top folder (.zgroup, .zmetadata), and all . files in the Qout var n(.zarray)
@@ -160,26 +239,35 @@ def sync_local_to_s3(local_zarr: str,
         logging.error(f"Sync failed. Error: {result.stderr}")
         raise Exception(result.stderr)
 
-def setup_configs(working_directory: str, 
-               configs_dir: str) -> None:
+def setup_configs(working_directory: str, configs_dir: str) -> None:
     """
     Setup all the directories we need, populate files
+
+    Args:
+        working_directory (str): The working directory where the directories will be created.
+        configs_dir (str): The directory containing the config files to be synced.
+
+    Returns:
+        None
     """
-    c_dir = os.path.join(working_directory, 'data','configs')
+    c_dir = os.path.join(working_directory, 'data', 'configs')
     os.makedirs(c_dir, exist_ok=True)
-    if len(glob.glob(os.path.join(c_dir, '*','*.csv'))) == 0:
+    if len(glob.glob(os.path.join(c_dir, '*', '*.csv'))) == 0:
         result = subprocess.run(f"aws s3 sync {configs_dir} {c_dir}", shell=True, capture_output=True, text=True)
         if result.returncode == 0:
             logging.info("Obtained config files")
         else:
-            logging.error(f"Config file sync error:{result.stderr}")
+            logging.error(f"Config file sync error: {result.stderr}")
  
 def check_installations() -> None:
     """
     Check that the following are installed:
-    aws cli
-    s5cmd
-    docker
+    - aws cli
+    - s5cmd
+    - docker
+
+    Raises:
+        NotInstalled: If any of the required installations are not found.
     """
     global S5CMD
     class NotInstalled(Exception):
@@ -207,23 +295,25 @@ def check_installations() -> None:
     except subprocess.CalledProcessError:
         raise NotInstalled('Please install docker, and run "docker pull chdavid/rapid"')
 
-def run_again(retro_zarr: str) -> bool:
-    try:
-        last_date = xr.open_zarr(retro_zarr)['time'][-1].values
-    except IndexError:
-        last_date = xr.open_zarr(retro_zarr)['time'].values
-    if pd.to_datetime(last_date + np.timedelta64(21,'D')) < datetime.now():
-        # If there are more than two weeks of data, we'll need to run again
-        return True
-    return False
-
-
 def main(working_dir: str,
          retro_zarr: str,
          nc: str) -> None:
     """
     Assumes docker is installed and this command was run: docker pull chdavid/rapid.
     Assumes AWS CLI and s5cmd are likewise installed. 
+
+    Executes the main workflow for running the RAPID model.
+
+    Args:
+        working_dir (str): The path to the working directory.
+        retro_zarr (str): The path to the retro zarr dataset.
+        nc (str): The path to the nc file.
+
+    Raises:
+        FileNotFoundError: If not all of the m3 files were generated.
+
+    Returns:
+        None
     """
     a_qfinal = glob.glob(os.path.join(working_dir, 'data','outputs','*','*Qfinal*.nc'))[0]
     cl.add_qinit(datetime.datetime.strptime(os.path.basename(a_qfinal).split('_')[2].split('.')[0], '%Y%m%d'))

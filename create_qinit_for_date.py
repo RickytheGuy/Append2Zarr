@@ -22,13 +22,28 @@ comids: dict[str: str] = {}
 for vpu in vpu_folders:
     comids[vpu.split('/')[-1]] = [f for f in s3.ls(vpu) if '/comid' in f][0]
 
-def main():
+def main() -> None:
+    """
+    This is the main function that creates the qfinal files for each VPU.
+
+    Returns:
+        None
+    """
     processes = multiprocessing.cpu_count()
     with multiprocessing.Pool(processes=processes) as pool:
         pool.map(helper, split_into_sublists([vpu for vpu, _ in comids.items()], processes))
     print('Finished')
 
 def helper(vpus: list[str]) -> None:
+    """
+    Helper function to create a netCDF file containing river water discharge data for each river reach.
+
+    Parameters:
+    vpus (list[str]): List of VPU identifiers.
+
+    Returns:
+    None
+    """
     ds = xr.open_zarr(retro_zarr)
     last_retro_time = xr.open_zarr(retro_zarr).time[-1].values
     last_time: str = np.datetime_as_string(last_retro_time, unit='D').replace('-','')
@@ -98,7 +113,17 @@ def helper(vpus: list[str]) -> None:
 
         ds.close()
 
-def split_into_sublists(lst, n):
+def split_into_sublists(lst: list, n: int) -> list[list]:
+    """
+    Splits a list into sublists of approximately equal size.
+
+    Args:
+        lst (list): The list to be split.
+        n (int): The number of sublists to create.
+
+    Returns:
+        list: A list of sublists, where each sublist contains approximately len(lst) // n elements.
+    """
     # Calculate the size of each sublist
     sublist_size = len(lst) // n
 

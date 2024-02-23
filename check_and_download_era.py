@@ -8,9 +8,7 @@ import pandas as pd
 
 from threading import Thread
 from queue import Queue
-import time
 import traceback
-import subprocess
 import glob
 import os
 from datetime import datetime
@@ -18,11 +16,25 @@ from datetime import datetime
 from cloud_logger import CloudLog
 
 class DownloadWorker(Thread):
+    """
+    A worker thread that downloads data using the provided parameters.
+
+    Args:
+        queue (Queue): The queue from which to retrieve the download parameters.
+
+    Attributes:
+        queue (Queue): The queue from which to retrieve the download parameters.
+    """
+
     def __init__(self, queue: Queue):
         Thread.__init__(self)
         self.queue = queue
 
-    def run(self, ):
+    def run(self):
+        """
+        The main method of the worker thread.
+        Retrieves download parameters from the queue and calls the retrieve_data function.
+        """
         while True:
             mnt_dir, client, year, month, days, index, index_2 = self.queue.get()
             try:
@@ -38,6 +50,15 @@ def download_era5(working_dir: str,
     """
     Downloads era5 runoff data. Logs to the CloudLog class. 
     Converts hourly runoff to daily. 
+
+    Parameters:
+    - working_dir (str): The directory where the era5 data will be downloaded.
+    - retro_zarr (str): The path to the retrospective zarr file.
+    - s3_bucket (str): The S3 bucket where the downloaded data will be stored.
+    - cl (CloudLog): An instance of the CloudLog class for logging.
+
+    Returns:
+    - None
     """
     os.makedirs(os.path.join(working_dir,'era5_data'), exist_ok=True)
     {os.remove(f) for f in glob.glob(os.path.join(working_dir,'era5_data', "*.nc"))}
@@ -147,28 +168,49 @@ def retrieve_data(mnt_dir: str,
                   index: int ,
                   index_2: int,) -> None:
     """
-    Retrieves era5 data. Note that if future dates are requested, 
-    cdsapi returns all data for dates that ARE available, ignoring future/not-done dates
-    """        
+    Retrieves era5 data.
+
+    Args:
+        mnt_dir (str): The directory where the data will be saved.
+        client (cdsapi.Client): The CDS API client.
+        year (int): The year of the data.
+        month (int): The month of the data.
+        days (list[int]): The list of days for which data will be retrieved.
+        index (int): The index of the data.
+        index_2 (int): Another index of the data.
+
+    Returns:
+        None
+    """
     client.retrieve(
-                f'reanalysis-era5-single-levels',
-                {
-                    'product_type': 'reanalysis',
-                    'format': 'netcdf',
-                    'variable': 'runoff',
-                    'year': year,
-                    'month': str(month).zfill(2),
-                    'day': [str(day).zfill(2) for day in days],
-                    'time': [f'{x:02d}:00' for x in range(0, 24)],
-                }, 
-                target=os.path.join(mnt_dir,'era5_data', f'era5_hourly_{index}_{index_2}.nc')
-            )
+        f'reanalysis-era5-single-levels',
+        {
+            'product_type': 'reanalysis',
+            'format': 'netcdf',
+            'variable': 'runoff',
+            'year': year,
+            'month': str(month).zfill(2),
+            'day': [str(day).zfill(2) for day in days],
+            'time': [f'{x:02d}:00' for x in range(0, 24)],
+        }, 
+        target=os.path.join(mnt_dir,'era5_data', f'era5_hourly_{index}_{index_2}.nc')
+    )
 
 
 def process_expver_variable(ds: xr.Dataset,
                             runoff: str = 'ro') -> xr.DataArray:
     """
     Function used in opening the downloaded files. If 'expver' is found, raise an error, since we should not use these files.
+
+    Parameters:
+    ds (xr.Dataset): The dataset containing the downloaded files.
+    runoff (str): The variable name for the runoff data. Default is 'ro'.
+
+    Returns:
+    xr.DataArray: The selected variable data array.
+
+    Raises:
+    ValueError: If 'expver' dimension is found in the dataset.
     """
     if 'expver' in ds.dims:
         raise ValueError('"expver" found in downloaded ERA files')
