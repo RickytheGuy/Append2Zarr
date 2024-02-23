@@ -59,16 +59,24 @@ def inflow_and_namelist(
 def get_initial_qinits(s3: s3fs.S3FileSystem, 
                        vpu_dirs: list[str],
                        qfinal_dir: str,
-                       working_dir: str) -> None:
+                       working_dir: str,
+                       last_retro_time: np.datetime64) -> None:
     """
     Get q initialization files from S3
     """
-    if len(glob.glob(os.path.join(working_dir, 'data','outputs','*','*Qfinal*.nc'))) != 125: # If we don't have enough qfinal files, reget from S3
+    last_retro_time: str = np.datetime_as_string(last_retro_time, unit='D').replace('-','')
+    local_qfinals = glob.glob(os.path.join(working_dir, 'data','outputs','*','*Qfinal*.nc'))
+    # If we don't have 125 qfinal files or the qfinal files we do have are not the latest, pull from s3.
+    if len(local_qfinals) != 125 or (len(local_qfinals) > 0 and os.path.basename(local_qfinals[0]).split('_')[-1].split('.')[0] != last_retro_time): 
+        s3_qfinals = s3.glob(f"{qfinal_dir}/*/Qfinal*{last_retro_time}.nc")
+        if not s3_qfinals:
+            raise FileNotFoundError(f"Could not find any Qfinal files in {qfinal_dir} for {last_retro_time}")
+        if len(s3_qfinals) != 125:
+            raise FileNotFoundError(f"Expected 125 Qfinal files in {qfinal_dir}, got {len(s3_qfinals)}")
+        
         {os.remove(f) for f in glob.glob(os.path.join(working_dir, 'data','outputs','*','*Qfinal*.nc'))}
         logging.info('Pulling qfinal files from s3')
-        qfinal_files = [sorted([qfinal for qfinal in s3.ls(f'{qfinal_dir}/{os.path.basename(f)}') if 'Qfinal' in qfinal], \
-                               key= lambda x: datetime.datetime.strptime(os.path.basename(x).split('_')[2].split('.')[0], '%Y%m%d'))[-1] for f in vpu_dirs if os.path.isdir(f)]
-        for s3_file in qfinal_files:
+        for s3_file in s3_qfinals:
             vpu = os.path.basename(s3_file).split('_')[1]
             os.makedirs(os.path.join(working_dir, 'data','outputs', vpu), exist_ok=True)
             with s3.open(s3_file, 'rb') as s3_f:
@@ -105,7 +113,6 @@ def drop_coords(ds: xr.Dataset, qout: str ='Qout'):
 def upload_to_s3(s3: s3fs.S3FileSystem,
                  file_path: str,
                  s3_path: str) -> None:
-    pass
     with open(file_path, 'rb') as f:
         with s3.open(s3_path, 'wb') as sf:
             sf.write(f.read())
@@ -131,18 +138,19 @@ def sync_local_to_s3(local_zarr: str,
     Note we only sink neccesarry files: all Qout/1.*, and all . files in the zarr
     """
     global S5CMD
-    # all . files in the top folder (.zgroup, .zmetadata), and all . files in the Qout var (.zarray)
-    files_to_upload = glob.glob(os.path.join(local_zarr, '.*')) + glob.glob(os.path.join(local_zarr, 'Qout', '.*')) 
+    # all . files in the top folder (.zgroup, .zmetadata), and all . files in the Qout var n(.zarray)
+    files_to_upload = glob.glob(os.path.join(local_zarr, '.*')) + glob.glob(os.path.join(local_zarr, 'Qout', '.*'))
     command = ""
     for f in files_to_upload:
         if 'Qout' in f:
-            # If file is in Qout var, upload to Qout folder
             destination = os.path.join(s3_zarr, 'Qout')
         else:
             # Otherwise, upload to the top-level folder
             destination = s3_zarr
-        command += f"{S5CMD} cp {f} {destination}\n"
-    command += f"{S5CMD} sync --size-only --include=\"*1.*\" {local_zarr}/Qout {s3_zarr}/Qout/"
+        command += f"{S5CMD} cp {f} {destination}/\n"
+    command += f"{S5CMD} sync --size-only --include=\"*1.*\" {local_zarr}/Qout/ {s3_zarr}/Qout/\n"
+    command += f"{S5CMD} sync --size-only {local_zarr}/time/ {s3_zarr}/time/"
+
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
 
     # Check if the command was successful
@@ -150,6 +158,7 @@ def sync_local_to_s3(local_zarr: str,
         logging.info("Sync completed successfully.")
     else:
         logging.error(f"Sync failed. Error: {result.stderr}")
+        raise Exception(result.stderr)
 
 def setup_configs(working_directory: str, 
                configs_dir: str) -> None:
@@ -261,12 +270,13 @@ if __name__ == '__main__':
     s3_zarr = 's3://geoglows-scratch/retrospective.zarr' # Zarr located on S3
     qfinal_dir = 's3://geoglows-scratch/retro' # Directory containing subdirectories, containing Qfinal files
     configs_dir = 's3://geoglows-v2/configs' # Directory containing subdirectories, containing the files to run RAPID. Only needed if running this for the first time
-    era_dir = 's3://geoglows-scrtach/era5_data' # Directory containing the ERA5 data
+    era_dir = 's3://geoglows-scratch/era_5' # Directory containing the ERA5 data
     try:
         cl = CloudLog()
+        s3 = s3fs.S3FileSystem()
         status = 'Pass'
         error = None
-        retro_zarr = os.path.join(mnt_directory, '2022_test.zarr') # Local zarr to append to
+        retro_zarr = os.path.join(mnt_directory, 'geoglows_v2_retrospective.zarr') # Local zarr to append to
         
         if not os.path.exists(retro_zarr):
             logging.error(f"{retro_zarr} does not exist!")
@@ -282,22 +292,32 @@ if __name__ == '__main__':
         setup_configs(working_directory, configs_dir)
         cleanup(working_directory, qfinal_dir)
         config_vpu_dirs = glob.glob(os.path.join(working_directory, 'data', 'configs', '*'))
-        get_initial_qinits(s3fs.S3FileSystem(), config_vpu_dirs, qfinal_dir, working_directory)
+        last_retro_time = xr.open_zarr(retro_zarr).time[-1].values
+        get_initial_qinits(s3, config_vpu_dirs, qfinal_dir, working_directory, last_retro_time)
 
-
-        s3 = s3fs.S3FileSystem()
-        ncs = s3.glob(f"{era_dir}/*.nc")
+        ncs = sorted(s3.glob(f"{era_dir}/*.nc")) # Sorted, so that we append correctly by date
         if not ncs:
             raise FileNotFoundError(f"Could not find any .nc files in {glob.glob(os.path.join(mnt_directory, 'era5_data'))}")
-        for era_nc in ncs:
-            main(working_directory, retro_zarr, era_nc)
+        for i, era_nc in enumerate(ncs):
+            with s3.open(era_nc, 'rb') as s3_file:
+                local_era5_nc = os.path.basename(era_nc)
+                with open(local_era5_nc, 'wb') as local_file:
+                    local_file.write(s3_file.read())
+
+            # Check that the time in the nc will accord with the retrospective zarr
+            first_era_time = xr.open_dataset(local_era5_nc).time[0].values
+            if last_retro_time + np.timedelta64(1, 'D') != first_era_time:
+                raise ValueError(f"Time mismatch between {local_era5_nc} and {retro_zarr}: got {first_era_time} and {last_retro_time} respectively (the era file should be 1 day behind the zarr). \
+                                 Please check the time in the .nc file and the zarr.")
+            
+            main(working_directory, retro_zarr, local_era5_nc)
+            if i + 1 < len(ncs): # Log each time we will run again, except for the last time
+                cl.log_message('Pass, running again')
+            os.remove(local_era5_nc)
+            s3.rm_file(era_nc)
         
         # At last, sync to S3
         sync_local_to_s3(retro_zarr, s3_zarr)
-
-        # Remove ERA5 files from S3
-        # for file_path in ncs:
-        #     s3.rm(file_path)
     except Exception as e:
         error = traceback.format_exc()
         logging.error(error)
