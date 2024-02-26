@@ -258,6 +258,19 @@ def setup_configs(working_directory: str, configs_dir: str) -> None:
             logging.info("Obtained config files")
         else:
             logging.error(f"Config file sync error: {result.stderr}")
+
+def date_sort(s: str) -> datetime:
+    """
+    Returns the date of the file as a datetime object.
+
+    Args:
+        s (str): The string .
+
+    Returns:
+        dateime: datetime representation of the string.
+    """
+    x = os.path.basename(s).split('.')[0].split('_')[1:]
+    return datetime(int(x[0]), int(x[1]), int(x[2].split('-')[1]))
  
 def check_installations() -> None:
     """
@@ -382,12 +395,12 @@ if __name__ == '__main__':
         setup_configs(working_directory, configs_dir)
         cleanup(working_directory, qfinal_dir)
         config_vpu_dirs = glob.glob(os.path.join(working_directory, 'data', 'configs', '*'))
-        last_retro_time = xr.open_zarr(retro_zarr).time[-1].values
+        last_retro_time = xr.open_zarr(retro_zarr)['time'][-1].values
         get_initial_qinits(s3, config_vpu_dirs, qfinal_dir, working_directory, last_retro_time)
 
-        ncs = sorted(s3.glob(f"{era_dir}/*.nc")) # Sorted, so that we append correctly by date
+        ncs = sorted(s3.glob(f"{era_dir}/*.nc"), key=date_sort) # Sorted, so that we append correctly by date
         if not ncs:
-            raise FileNotFoundError(f"Could not find any .nc files in {glob.glob(os.path.join(mnt_directory, 'era5_data'))}")
+            raise FileNotFoundError(f"Could not find any .nc files in {era_dir}")
         for i, era_nc in enumerate(ncs):
             with s3.open(era_nc, 'rb') as s3_file:
                 local_era5_nc = os.path.basename(era_nc)
@@ -395,16 +408,16 @@ if __name__ == '__main__':
                     local_file.write(s3_file.read())
 
             # Check that the time in the nc will accord with the retrospective zarr
-            first_era_time = xr.open_dataset(local_era5_nc).time[0].values
+            first_era_time = xr.open_dataset(local_era5_nc)['time'][0].values
             if last_retro_time + np.timedelta64(1, 'D') != first_era_time:
-                raise ValueError(f"Time mismatch between {local_era5_nc} and {retro_zarr}: got {first_era_time} and {last_retro_time} respectively (the era file should be 1 day behind the zarr). \
-                                 Please check the time in the .nc file and the zarr.")
+                raise ValueError(f"Time mismatch between {local_era5_nc} and {retro_zarr}: got {first_era_time} and {last_retro_time} respectively (the era file should be 1 day behind the zarr). Please check the time in the .nc file and the zarr.")
             
             main(working_directory, retro_zarr, local_era5_nc)
             if i + 1 < len(ncs): # Log each time we will run again, except for the last time
                 cl.log_message('Pass, running again')
             os.remove(local_era5_nc)
             s3.rm_file(era_nc)
+            cleanup(working_directory, qfinal_dir)
         
         # At last, sync to S3
         sync_local_to_s3(retro_zarr, s3_zarr)

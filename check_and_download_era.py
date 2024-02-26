@@ -36,9 +36,9 @@ class DownloadWorker(Thread):
         Retrieves download parameters from the queue and calls the retrieve_data function.
         """
         while True:
-            mnt_dir, client, year, month, days, index, index_2 = self.queue.get()
+            era_dir, client, year, month, days = self.queue.get()
             try:
-                retrieve_data(mnt_dir, client, year, month, days, index, index_2)
+                retrieve_data(era_dir, client, year, month, days)
             finally:
                 self.queue.task_done()
 
@@ -60,8 +60,8 @@ def download_era5(working_dir: str,
     Returns:
     - None
     """
-    os.makedirs(os.path.join(working_dir,'era5_data'), exist_ok=True)
-    {os.remove(f) for f in glob.glob(os.path.join(working_dir,'era5_data', "*.nc"))}
+    era_dir = os.path.join(working_dir,'era5_data')
+    os.makedirs(era_dir, exist_ok=True)
     try:
         c = cdsapi.Client()
     except:
@@ -95,20 +95,23 @@ def download_era5(working_dir: str,
         times_to_download.pop(-1)
 
     cl.add_time_period(date_range.tolist())
-    # This machine holds ~100 GB, which means we can download at most 30 weeks of ERA5 data
-    times_to_download_split = [times_to_download[i:i+30] for i in range(0, len(times_to_download), 30)]
+    # This machine holds ~100 GB, which means we can download at most 250 weeks of ERA5 data (added to ensure we don't run out of space, but will probably never be used)
+    max_weeks = 200 # 50 weeks buffer gives 20 GB extra space
+    times_to_download_split = [times_to_download[i:i+max_weeks] for i in range(0, len(times_to_download), max_weeks)]
     for times_to_download in times_to_download_split:
         requests = []
         num_requests = 0
-        for i, time_list in enumerate(times_to_download):
+        ncs = glob.glob(os.path.join(era_dir, '*.nc'))
+        for time_list in times_to_download:
             years = {d.year for d in time_list}
             months = {d.month for d in time_list}
 
             # Create a request for each month for each year, using only the days in that month. This will support any timespan
             for year in years:
                 for month in months:
-                    if month in {t.month for t in time_list if t.year == year}:
-                        requests.append((working_dir, c, year, month, sorted({t.day for t in time_list if t.year == year and t.month == month}), i, num_requests))
+                    days = sorted({t.day for t in time_list if t.year == year and t.month == month})
+                    if month in {t.month for t in time_list if t.year == year} and not is_downloaded(ncs, year, month, days):
+                        requests.append((era_dir, c, year, month, days))
                         num_requests += 1
 
         # Use multithreading so that we can make more requests at once if need be
@@ -124,17 +127,23 @@ def download_era5(working_dir: str,
         queue.join()
 
         # # Check that the number of files downloaded match the number of requests
-        ncs = sorted(glob.glob(os.path.join(working_dir, 'era5_data', '*.nc')))
-        if len(ncs) != num_requests:
-            raise ValueError(f"Found {len(ncs)} in {os.path.join(working_dir, 'era5_data')}, but expected {num_requests}")
+        ncs = sorted(glob.glob(os.path.join(era_dir, '*.nc')), key=date_sort)
 
-        netcdf_dict = {}
+        netcdf_pairs = []
+        skip = False
         for nc in ncs:
-            if os.path.basename(nc).split('_')[2] not in netcdf_dict:
-                netcdf_dict[os.path.basename(nc).split('_')[2]] =  []
-            netcdf_dict[os.path.basename(nc).split('_')[2]].append(nc)
+            if skip:
+                skip = False
+                continue
+            first_day, last_day = nc.split('_')[4].split('.')[0].split('-')
+            if int(last_day) - int(first_day) + 1 == 7:
+                netcdf_pairs.append(nc)
+            else:
+                netcdf_pairs.append([nc, ncs[ncs.index(nc) + 1]])
+                skip = True
 
-        for key, ncs_to_use in netcdf_dict.items():
+
+        for ncs_to_use in netcdf_pairs:
             with dask.config.set(**{'array.slicing.split_large_chunks': False}):
                 ds = (xr.open_mfdataset(ncs_to_use, 
                                     concat_dim='time', 
@@ -150,23 +159,39 @@ def download_era5(working_dir: str,
                 ds['time'] = ds['time'].values.astype('datetime64[ns]')
                 
             # Make sure all days were downloaded
-            if ds['time'].shape[0] != number_of_days: 
-                raise ValueError(f'The entire time series was not downloaded correctly ({ds["time"].shape[0]} of {number_of_days}) likely ECMWF has not updated their datasets')
+            if ds['time'].shape[0] != 7: 
+                raise ValueError(f'The entire time series was not downloaded correctly ({ds["time"].shape[0]} of {7} for {ncs_to_use}) likely ECMWF has not updated their datasets')
 
             ds.to_netcdf('temp.nc')
-            s3.put('temp.nc', s3_bucket + '/era_5/' + f'era5_daily_{key}.nc')
+            if isinstance(ncs_to_use, list):
+                outname = "era5_"
+                nc_year = ncs_to_use[0].split('_')[2]
+                nc_month = ncs_to_use[0].split('_')[3]
+                nc_days = ncs_to_use[0].split('_')[4].split('.')[0].split('-')
+                if nc_year != ncs_to_use[1].split('_')[2]:
+                    outname += f"{nc_year}-{ncs_to_use[1].split('_')[2]}_"
+                else:
+                    outname += f"{nc_year}_"
+                if nc_month != ncs_to_use[1].split('_')[3]:
+                    outname += f"{nc_month}-{ncs_to_use[1].split('_')[3]}_"
+                else:
+                    outname += f"{nc_month}_"
+                outname += f"{nc_days[0]}-{ncs_to_use[1].split('_')[4].split('.')[0].split('-')[-1]}.nc"
+            else:
+                outname = os.path.basename(ncs_to_use)
+            s3.put('temp.nc', s3_bucket + '/era_5/' + outname)
 
             # Remove uncombined netcdfs
+            if isinstance(ncs_to_use, str):
+                ncs_to_use = [ncs_to_use]
             for nc in ncs_to_use:
                 os.remove(nc)
 
-def retrieve_data(mnt_dir: str,
+def retrieve_data(era_dir: str,
                   client: cdsapi.Client, 
                   year: int, 
                   month: int, 
-                  days: list[int], 
-                  index: int ,
-                  index_2: int,) -> None:
+                  days: list[int],) -> None:
     """
     Retrieves era5 data.
 
@@ -193,9 +218,21 @@ def retrieve_data(mnt_dir: str,
             'day': [str(day).zfill(2) for day in days],
             'time': [f'{x:02d}:00' for x in range(0, 24)],
         }, 
-        target=os.path.join(mnt_dir,'era5_data', f'era5_hourly_{index}_{index_2}.nc')
+        target=os.path.join(era_dir, f'era5_{year}_{month}_{days[0]}-{days[-1]}.nc')
     )
 
+def date_sort(s: str) -> datetime:
+    """
+    Sorts the string by the date.
+
+    Args:
+        s (str): The string to be sorted.
+
+    Returns:
+        bool: The sorted string.
+    """
+    x = os.path.basename(s).split('.')[0].split('_')[1:]
+    return datetime(int(x[0]), int(x[1]), int(x[2].split('-')[1]))
 
 def process_expver_variable(ds: xr.Dataset,
                             runoff: str = 'ro') -> xr.DataArray:
@@ -215,6 +252,19 @@ def process_expver_variable(ds: xr.Dataset,
     if 'expver' in ds.dims:
         raise ValueError('"expver" found in downloaded ERA files')
     return ds[runoff]
+
+def is_downloaded(ncs: list[str], 
+                  year: str, 
+                  month: str, 
+                  days: list[int]) -> bool:
+    # Check any already downloaded era 5 files to see if we need to download this time period
+    for nc in ncs:
+        nc_year = int(nc.split('_')[2])
+        nc_month = int(nc.split('_')[3])
+        nc_days = [int(x) for x in nc.split('_')[4].split('.')[0].split('-')]
+        if nc_year == year and nc_month == month and set(nc_days).issubset(set(days)):
+            return True
+    return False
 
 
 if __name__ == "__main__":
