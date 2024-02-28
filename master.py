@@ -259,7 +259,7 @@ def setup_configs(working_directory: str, configs_dir: str) -> None:
         else:
             logging.error(f"Config file sync error: {result.stderr}")
 
-def date_sort(s: str) -> datetime:
+def date_sort(s: str) -> datetime.datetime:
     """
     Returns the date of the file as a datetime object.
 
@@ -270,7 +270,10 @@ def date_sort(s: str) -> datetime:
         dateime: datetime representation of the string.
     """
     x = os.path.basename(s).split('.')[0].split('_')[1:]
-    return datetime(int(x[0]), int(x[1]), int(x[2].split('-')[1]))
+    year = x[0] if '-' not in x[0] else x[0].split('-')[1]
+    month = x[1] if '-' not in x[1] else x[1].split('-')[1]
+    day = x[2].split('-')[1]
+    return datetime.datetime(int(year), int(month), int(day))
  
 def check_installations() -> None:
     """
@@ -362,8 +365,7 @@ def main(working_dir: str,
     with xr.open_mfdataset(qouts, 
                         combine='nested', 
                         concat_dim='rivid',
-                        preprocess=drop_coords, 
-                        parallel=True).reindex(rivid=xr.open_zarr(retro_zarr).rivid) as ds:
+                        preprocess=drop_coords,).reindex(rivid=xr.open_zarr(retro_zarr).rivid) as ds:
 
         append_week(ds, retro_zarr)
 
@@ -409,6 +411,8 @@ if __name__ == '__main__':
 
             # Check that the time in the nc will accord with the retrospective zarr
             first_era_time = xr.open_dataset(local_era5_nc)['time'][0].values
+            last_retro_time = xr.open_zarr(retro_zarr)['time'][-1].values
+            cl.add_last_date(last_retro_time)
             if last_retro_time + np.timedelta64(1, 'D') != first_era_time:
                 raise ValueError(f"Time mismatch between {local_era5_nc} and {retro_zarr}: got {first_era_time} and {last_retro_time} respectively (the era file should be 1 day behind the zarr). Please check the time in the .nc file and the zarr.")
             
