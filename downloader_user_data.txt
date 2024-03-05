@@ -1,0 +1,30 @@
+Content-Type: multipart/mixed; boundary="//"
+MIME-Version: 1.0
+
+--//
+Content-Type: text/cloud-config; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="cloud-config.txt"
+
+#cloud-config
+cloud_final_modules:
+- [scripts-user, always]
+
+--//
+Content-Type: text/x-shellscript; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="userdata.txt"
+
+#!/bin/bash
+eval $(/home/ubuntu/miniconda3/bin/conda shell.bash hook)
+source /home/ubuntu/miniconda3/bin/activate download
+cd /home/ubuntu
+export ACCESS_KEY_ID=AKIARZCE2HY2LBC2C77D
+export SECRET_ACCESS_KEY=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
+export OTHER_INSTANCE="i-0b8b87a96887f5684"
+#/home/ubuntu/miniconda3/envs/download/bin/python /home/ubuntu/download_era.py
+#sudo shutdown -h now
+
+--//--
