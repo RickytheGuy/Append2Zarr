@@ -21,9 +21,9 @@ Content-Disposition: attachment; filename="userdata.txt"
 eval $(/home/ubuntu/miniconda3/bin/conda shell.bash hook)
 source /home/ubuntu/miniconda3/bin/activate download
 cd /home/ubuntu
-export ACCESS_KEY_ID=AKIARZCE2HY2LBC2C77D
-export SECRET_ACCESS_KEY=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
-export OTHER_INSTANCE="i-0b8b87a96887f5684"
+export ACCESS_KEY_ID=
+export SECRET_ACCESS_KEY=
+export OTHER_INSTANCE=
 #/home/ubuntu/miniconda3/envs/download/bin/python /home/ubuntu/download_era.py
 #sudo shutdown -h now
 
