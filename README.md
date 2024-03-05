@@ -25,9 +25,11 @@ Using two EC2 instances, download ERA5 data on one, and use that data on the oth
 ``` 
 cd $HOME
 curl -L "https://github.com/username/repo/archive/main.zip" -o repo.zip
+mkdir -p Append2Zarr
+sudo apt-get install unzip
 unzip repo.zip -d Append2Zarr
 rm repo.zip
-Append2Zarr/downloader_scripts/install.sh
+./Append2Zarr/downloader_scripts/install.sh
 ```
 3. Create a 100GB volume (read how to do that [here](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-creating-volume.html)). Setup the instance to automatically attatch that volume on each startup (instructions under "Automatically mount an attached volume after reboot" [here](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-using-volumes.html)). Remember the mount location you choose (we recommend simply using "/mnt")
 4. Stop the instance.
