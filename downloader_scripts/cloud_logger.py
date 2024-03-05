@@ -121,7 +121,7 @@ class CloudLog():
         self.message = ''
 
 
-    def log_message(self, status: str, message: Exception = None) -> dict:
+    def log_message(self, status: str, error: Exception = None) -> dict:
         """
         Logs a message to CloudWatch.
 
@@ -134,13 +134,12 @@ class CloudLog():
         """
         global LOG_GROUP_NAME
         global LOG_STREAM_NAME
-        if message is not None:
-            self.message = message
         log_message = {
             'Start time': self.start,
             'End time': datetime.datetime.now().ctime(),
             'Status': status,
             'Message': self.message,
+            'Error': str(error),
             'Most recent date in Zarr': self.last_date,
             'Qinit used': self.qinit,
             'Time period': self.time_period

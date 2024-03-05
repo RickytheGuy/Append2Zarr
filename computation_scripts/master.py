@@ -1,15 +1,12 @@
 import os, glob, subprocess, logging, multiprocessing, datetime, traceback
 
 import xarray as xr
-import pandas as pd
 import numpy as np
 import s3fs
-import boto3
 import psutil
 
 from generate_namelist import rapid_namelist_from_directories
 from inflow import create_inflow_file
-from check_and_download_era import download_era5
 from append import append_week
 from cloud_logger import CloudLog
 
@@ -17,17 +14,6 @@ logging.basicConfig(level=logging.INFO,
                     filename='log.log',
                     format='%(asctime)s - %(levelname)s - %(message)s')
 S5CMD = 's5cmd'
-
-def shutdown() -> None:
-    """
-    Shuts down the system immediately.
-
-    This function executes the 'sudo shutdown -h now' command to initiate an immediate system shutdown.
-
-    Returns:
-        None
-    """
-    os.system("sudo shutdown -h now")
 
 def inflow_and_namelist(
         working_dir: str,
@@ -298,7 +284,7 @@ def check_installations() -> None:
     except FileNotFoundError as e:
         S5CMD = os.environ['CONDA_PREFIX']
         if 'envs' not in S5CMD:
-            S5CMD = os.environ['CONDA_PREFIX_2']
+            S5CMD = os.environ['CONDA_PREFIX_1'] or os.environ['CONDA_PREFIX_2']
             if 'envs' not in S5CMD:
                 raise e
         S5CMD = os.path.join(S5CMD, 'bin','s5cmd')
@@ -365,39 +351,40 @@ def main(working_dir: str,
     with xr.open_mfdataset(qouts, 
                         combine='nested', 
                         concat_dim='rivid',
-                        preprocess=drop_coords,).reindex(rivid=xr.open_zarr(retro_zarr).rivid) as ds:
+                        preprocess=drop_coords,).reindex(rivid=xr.open_zarr(retro_zarr)['rivid']) as ds:
 
         append_week(ds, retro_zarr)
 
 if __name__ == '__main__':
-    working_directory = '/home/ubuntu/'
-    mnt_directory = "/mnt/retro_volume"  # The volume is mounted to this location upon each EC2 startup. To change, modify /etc/fstab
-    s3_zarr = 's3://geoglows-scratch/retrospective.zarr' # Zarr located on S3
-    qfinal_dir = 's3://geoglows-scratch/retro' # Directory containing subdirectories, containing Qfinal files
-    configs_dir = 's3://geoglows-v2/configs' # Directory containing subdirectories, containing the files to run RAPID. Only needed if running this for the first time
-    era_dir = 's3://geoglows-scratch/era_5' # Directory containing the ERA5 data
     try:
         cl = CloudLog()
         s3 = s3fs.S3FileSystem()
-        status = 'Pass'
-        error = None
-        retro_zarr = os.path.join(mnt_directory, 'geoglows_v2_retrospective.zarr') # Local zarr to append to
+
+        working_directory = os.getenv('WORKING_DIR')
+        volume_directory = os.getenv('VOLUME_DIR')  # The volume is mounted to this location upon each EC2 startup. To change, modify /etc/fstab
+        s3_zarr = os.getenv('S3_ZARR') # Zarr located on S3
+        qfinal_dir = os.getenv('QFINAL_DIR') # Directory containing subdirectories, containing Qfinal files
+        configs_dir = os.getenv('CONFIGS_DIR') # Directory containing subdirectories, containing the files to run RAPID. Only needed if running this for the first time
+        era_dir = os.getenv('ERA_DIR') # Directory containing the ERA5 data
+        local_zarr = os.getenv('LOCAL_ZARR') # Local zarr to append to
+
+        local_zarr = os.path.join(volume_directory, local_zarr) # Local zarr to append to
         
-        if not os.path.exists(retro_zarr):
-            logging.error(f"{retro_zarr} does not exist!")
-            cl.log_message('Fail', f"{retro_zarr} does not exist!")
-            shutdown()
+        if not os.path.exists(local_zarr):
+            logging.error(f"{local_zarr} does not exist!")
+            cl.log_message('FAIL', f"{local_zarr} does not exist!")
+            exit()
         if not os.path.exists(os.path.join(working_directory, 'data', 'runrapid.py')):
             msg = f"Please put 'runrapid.py' in {working_directory}/data so that RAPID may use it"
             logging.error(msg)
-            cl.log_message('Fail', msg)
-            shutdown()
+            cl.log_message('FAIL', msg)
+            exit()
 
         check_installations()
         setup_configs(working_directory, configs_dir)
         cleanup(working_directory, qfinal_dir)
         config_vpu_dirs = glob.glob(os.path.join(working_directory, 'data', 'configs', '*'))
-        last_retro_time = xr.open_zarr(retro_zarr)['time'][-1].values
+        last_retro_time = xr.open_zarr(local_zarr)['time'][-1].values
         get_initial_qinits(s3, config_vpu_dirs, qfinal_dir, working_directory, last_retro_time)
 
         ncs = sorted(s3.glob(f"{era_dir}/*.nc"), key=date_sort) # Sorted, so that we append correctly by date
@@ -411,25 +398,23 @@ if __name__ == '__main__':
 
             # Check that the time in the nc will accord with the retrospective zarr
             first_era_time = xr.open_dataset(local_era5_nc)['time'][0].values
-            last_retro_time = xr.open_zarr(retro_zarr)['time'][-1].values
+            last_retro_time = xr.open_zarr(local_zarr)['time'][-1].values
             cl.add_last_date(last_retro_time)
             if last_retro_time + np.timedelta64(1, 'D') != first_era_time:
-                raise ValueError(f"Time mismatch between {local_era5_nc} and {retro_zarr}: got {first_era_time} and {last_retro_time} respectively (the era file should be 1 day behind the zarr). Please check the time in the .nc file and the zarr.")
+                raise ValueError(f"Time mismatch between {local_era5_nc} and {local_zarr}: got {first_era_time} and {last_retro_time} respectively (the era file should be 1 day behind the zarr). Please check the time in the .nc file and the zarr.")
             
-            main(working_directory, retro_zarr, local_era5_nc)
+            main(working_directory, local_zarr, local_era5_nc)
             if i + 1 < len(ncs): # Log each time we will run again, except for the last time
-                cl.log_message('Pass, running again')
+                cl.log_message('RUNNING AGAIN')
             os.remove(local_era5_nc)
             s3.rm_file(era_nc)
             cleanup(working_directory, qfinal_dir)
         
         # At last, sync to S3
-        sync_local_to_s3(retro_zarr, s3_zarr)
+        sync_local_to_s3(local_zarr, s3_zarr)
+        cleanup(working_directory, qfinal_dir)
+        cl.log_message('COMPLETE', 'Finished')
     except Exception as e:
         error = traceback.format_exc()
         logging.error(error)
-        status = 'Fail'
-    finally:
-        cleanup(working_directory, qfinal_dir)
-        cl.log_message(status, error)
-        shutdown()
+        cl.log_message('FAIL', error)

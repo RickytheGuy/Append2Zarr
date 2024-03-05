@@ -271,19 +271,21 @@ if __name__ == "__main__":
     """
     We assume the the volume already has a file system and data (the treospective zarr)
     """
-    OTHER_INSTANCE_ID = os.getenv('OTHER_INSTANCE') or 'i-0b8b87a96887f5684'
-    S3_BUCKET = 's3://geoglows-scratch'
-    cl =CloudLog()
-    working_dir = os.getcwd()
+    cl = CloudLog()
     try:
-        bucket_uri = os.path.join(S3_BUCKET, 'retrospective.zarr')
-        region_name = 'us-west-2'
+        other_instance = os.getenv('OTHER_INSTANCE')
+        working_directory = os.getenv('WORKING_DIR')
+        s3_bucket = os.getenv('S3_BUCKET')
+        s3_zarr_name = os.getenv('S3_ZARR_NAME')
+        region_name = os.getenv('REGION_NAME')
+        
+        bucket_uri = os.path.join(s3_bucket, s3_zarr_name)
         s3 = s3fs.S3FileSystem(anon=False, client_kwargs=dict(region_name=region_name))
         retro_zarr = s3fs.S3Map(root=bucket_uri, s3=s3, check=False)
-        download_era5(working_dir, retro_zarr, S3_BUCKET, cl)
+        download_era5(working_directory, retro_zarr, s3_bucket, cl)
 
         ec2 = boto3.client('ec2', region_name = "us-west-2")
-        ec2.start_instances(InstanceIds=[OTHER_INSTANCE_ID])
+        ec2.start_instances(InstanceIds=[other_instance])
         cl.log_message('Pass')
     except Exception as e:
         cl.log_message('Fail', traceback.format_exc())
