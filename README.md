@@ -23,6 +23,7 @@ Using two EC2 instances, download ERA5 data on one, and use that data on the oth
 2. Run the following code in the EC2 isntance's terminal:
 ``` 
 cd $HOME
+sudo apt-get update
 sudo apt-get install git
 git clone https://github.com/RickytheGuy/retrospective-update/archive/refs/heads/main.zip
 mv retrospective-update-main retrospective-update
@@ -55,6 +56,7 @@ region=YOUR_REGION
 2. Run the following code in the EC2 isntance's terminal:
 ``` 
 cd $HOME
+sudo apt-get update
 sudo apt-get install git
 git clone https://github.com/RickytheGuy/retrospective-update/archive/refs/heads/main.zip
 mv retrospective-update-main retrospective-update
@@ -70,4 +72,20 @@ region=YOUR_REGION
 ```
 5. Fill out the .profile file found in retrospective-update/downloader_scripts/
 6. Stop the instance.
+
+### Create a lambda function
+1. Go to the AWS Lambda servicec page. Click the "Create function" button.
+2. Give your function a name. Select "Python 3.12" for the "Runtime" option. Under "Change default execution role", select "Use an existing role", and choose the Lambda Role you created previously. Click "Create function"
+3. Replace the code provided with the following, inserting the appropriate values for region and InstanceIds:
+```
+import json
+import boto3
+
+region = "INSERT_YOUR_REGION"
+
+def lambda_handler(event, context):
+    ec2 = boto3.client('ec2', region_name=region)
+    ec2.start_instances(InstanceIds=["INSERT_DOWNLOAD_EC2_ID_HERE"])
+```
+4. In the configuration tab, under General Configuration, edit the Memory and Ephemeral storage to be the lowest value (128 MB & 512 MB), and set the Timeout to be 0 min, 10 sec.
 
