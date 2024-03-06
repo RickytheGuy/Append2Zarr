@@ -360,7 +360,7 @@ if __name__ == '__main__':
         cl = CloudLog()
         s3 = s3fs.S3FileSystem()
 
-        working_directory = os.getenv('WORKING_DIR')
+        working_directory = os.getcwd()
         volume_directory = os.getenv('VOLUME_DIR')  # The volume is mounted to this location upon each EC2 startup. To change, modify /etc/fstab
         s3_zarr = os.getenv('S3_ZARR') # Zarr located on S3
         qfinal_dir = os.getenv('QFINAL_DIR') # Directory containing subdirectories, containing Qfinal files
