@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
-ENVIRONMENT_FILE="Append2Zarr/computation_scripts/environment.yaml"
+ENVIRONMENT_FILE="retrospective-update/computation_scripts/environment.yaml"
 ENVIRONMENT_NAME="add_week"
 
 sudo apt-get update
