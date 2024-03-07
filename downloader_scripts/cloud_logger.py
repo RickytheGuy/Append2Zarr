@@ -96,7 +96,12 @@ class CloudLog():
         Returns:
             None
         """
-        self.time_period = f"{time_range[0].strftime('%m/%d/%Y')} to {time_range[-1].strftime('%m/%d/%Y')}"
+        if not time_range:
+            self.time_period = "No time period"
+        elif len(time_range) == 1:
+            self.time_period = time_range[0].strftime('%m/%d/%Y')
+        else:
+            self.time_period = f"{time_range[0].strftime('%m/%d/%Y')} to {time_range[-1].strftime('%m/%d/%Y')}"
 
     def add_message(self, msg) -> None:
         """
@@ -114,14 +119,13 @@ class CloudLog():
         """
         Clears the logger by resetting all attributes to their initial values.
         """
-        self.start = datetime.datetime.now().ctime()
         self.last_date = None
         self.qinit = None
         self.time_period = None
         self.message = ''
 
 
-    def log_message(self, status: str, error: Exception = None) -> dict:
+    def log_message(self, status: str, message: str = None) -> dict:
         """
         Logs a message to CloudWatch.
 
@@ -134,12 +138,13 @@ class CloudLog():
         """
         global LOG_GROUP_NAME
         global LOG_STREAM_NAME
+        if message is not None:
+            self.message = message
         log_message = {
             'Start time': self.start,
-            'End time': datetime.datetime.now().ctime(),
+            'Message time': datetime.datetime.now().ctime(),
             'Status': status,
             'Message': self.message,
-            'Error': str(error),
             'Most recent date in Zarr': self.last_date,
             'Qinit used': self.qinit,
             'Time period': self.time_period
@@ -157,7 +162,6 @@ class CloudLog():
                     }
                 ]
             )
+            return response
         except Exception as e:
             logging.error(e)
-
-        return response
