@@ -99,6 +99,7 @@ def download_era5(working_dir: str,
         times_to_download.pop(-1)
 
     cl.add_time_period(date_range.tolist())
+    cl.log_message('RUNNING', "Beginning download")
     # This machine holds ~100 GB, which means we can download at most 250 weeks of ERA5 data (added to ensure we don't run out of space, but will probably never be used)
     max_weeks = 200 # 50 weeks buffer gives 20 GB extra space
     times_to_download_split = [times_to_download[i:i+max_weeks] for i in range(0, len(times_to_download), max_weeks)]
