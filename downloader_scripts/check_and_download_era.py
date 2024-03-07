@@ -46,28 +46,32 @@ class DownloadWorker(Thread):
 def download_era5(working_dir: str,
                   retro_zarr: str,
                   s3_bucket: str,
+                  mnt_dir: str,
                   cl: CloudLog) -> None:
     """
     Downloads era5 runoff data. Logs to the CloudLog class. 
     Converts hourly runoff to daily. 
 
     Parameters:
-    - working_dir (str): The directory where the era5 data will be downloaded.
+    - working_dir (str): The current working directory.
     - retro_zarr (str): The path to the retrospective zarr file.
     - s3_bucket (str): The S3 bucket where the downloaded data will be stored.
+    - mnt_dir (str): The directory where the data will be saved.
     - cl (CloudLog): An instance of the CloudLog class for logging.
 
     Returns:
     - None
     """
-    era_dir = os.path.join(working_dir,'era5_data')
+    era_dir = os.path.join(mnt_dir,'era5_data')
     os.makedirs(era_dir, exist_ok=True)
     try:
         c = cdsapi.Client()
     except:
         cdsapirc_file = os.path.join(working_dir, '.cdsapirc')
         if not os.path.exists(cdsapirc_file):
-            raise FileNotFoundError(f"Cannot find a .cdsapirc in {working_dir}")
+            cdsapirc_file = os.path.join(os.getenv['HOME'], '.cdsapirc')
+            if not os.path.exists(cdsapirc_file):
+                raise FileNotFoundError(f"Cannot find a .cdsapirc in {working_dir} or {os.getenv['HOME']}")
         os.environ['CDSAPI_RC'] = cdsapirc_file
         c = cdsapi.Client()
 
@@ -273,8 +277,9 @@ if __name__ == "__main__":
     """
     cl = CloudLog()
     try:
+        working_directory = os.getcwd()
+        mnt_dir = os.getenv('MNT_DIR')
         other_instance = os.getenv('OTHER_INSTANCE')
-        working_directory = os.getenv('WORKING_DIR')
         s3_bucket = os.getenv('S3_BUCKET')
         s3_zarr_name = os.getenv('S3_ZARR_NAME')
         region_name = os.getenv('REGION_NAME')
@@ -282,7 +287,7 @@ if __name__ == "__main__":
         bucket_uri = os.path.join(s3_bucket, s3_zarr_name)
         s3 = s3fs.S3FileSystem(anon=False, client_kwargs=dict(region_name=region_name))
         retro_zarr = s3fs.S3Map(root=bucket_uri, s3=s3, check=False)
-        download_era5(working_directory, retro_zarr, s3_bucket, cl)
+        download_era5(working_directory, retro_zarr, s3_bucket, mnt_dir,cl)
 
         ec2 = boto3.client('ec2', region_name = "us-west-2")
         ec2.start_instances(InstanceIds=[other_instance])
