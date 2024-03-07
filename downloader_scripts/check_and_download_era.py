@@ -69,7 +69,7 @@ def download_era5(working_dir: str,
     except:
         cdsapirc_file = os.path.join(working_dir, '.cdsapirc')
         if not os.path.exists(cdsapirc_file):
-            cdsapirc_file = os.path.join(os.getenv['HOME'], '.cdsapirc')
+            cdsapirc_file = os.path.join(os.getenv('HOME'), '.cdsapirc')
             if not os.path.exists(cdsapirc_file):
                 raise FileNotFoundError(f"Cannot find a .cdsapirc in {working_dir} or {os.getenv['HOME']}")
         os.environ['CDSAPI_RC'] = cdsapirc_file
