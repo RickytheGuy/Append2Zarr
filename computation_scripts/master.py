@@ -59,7 +59,7 @@ def inflow_and_namelist(
 
         # Correct the paths in the namelist file
         with open(namelist, 'r') as f:
-            text = f.read().replace('/home/ubuntu', '/mnt')
+            text = f.read().replace(working_dir, '/mnt')
         with open(namelist, 'w') as f:
             f.write(text)
 
@@ -395,7 +395,7 @@ if __name__ == '__main__':
         if not ncs:
             logging.error(f"Could not find any .nc files in {era_dir}")
             raise FileNotFoundError(f"Could not find any .nc files in {era_dir}")
-        cl.log_message('START', f"Appending {len(ncs)} ERA5 files to {local_zarr}")
+        cl.log_message('START', f"Appending {len(ncs)} ERA5 file(s) to {local_zarr}")
         for i, era_nc in enumerate(ncs):
             with s3.open(era_nc, 'rb') as s3_file:
                 local_era5_nc = os.path.basename(era_nc)
