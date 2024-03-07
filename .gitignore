@@ -1,1 +1,6 @@
 *.pyc
+*.csv
+*.parquet
+*namelist*
+*.log
+*.nc
