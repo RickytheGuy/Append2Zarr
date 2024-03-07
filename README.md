@@ -22,12 +22,12 @@ Using two EC2 instances, download ERA5 data on one, and use that data on the oth
 3. Under "Key pair (login)", choose or create a key pair.
 4. Under "Network settings", choose or create a security group. Enable "Auto-assign public IP".
 5. Under "Configure Storage", choose an appropriate amount of storage to hold the OS and a few GBs of data.
-6. Under "Advanced details", selct the IAM instance profile created earlier. 
+6. Under "Advanced details", selct the EC2 IAM instance profile created earlier. 
 7. Finally, click the "Launch instance" button
 
 ### Setup the computation instance
 1. Use SSH to connect to your instance (it should automatically start after launching). The command should look something like "ssh -i PATH/TO/KEY-PAIR.PEM ubuntu@IP-ADDRESS". The IP address can be viewed in the Instances page of the EC2 service.
-2. Run the following code in the EC2 isntance's terminal:
+2. Run the following code in the EC2 instance's terminal:
 ``` 
 cd $HOME
 sudo apt-get update
@@ -76,7 +76,8 @@ aws_secret_access_key=YOUR_KEY
 region=YOUR_REGION
 ```
 5. Fill out the .profile file found in retrospective-update/downloader_scripts/
-6. Stop the instance.
+6. The downloader instance needs a .cdsapirc file located either in the home directory or in the retrospective-update/downloader_scripts/ directory. Get this file from [here](https://cds.climate.copernicus.eu/user/186014)
+7. Stop the instance.
 
 ### Create a lambda function
 1. Go to the AWS Lambda servicec page. Click the "Create function" button.
