@@ -356,7 +356,7 @@ def main(working_dir: str,
                         concat_dim='rivid',
                         preprocess=drop_coords,).reindex(rivid=xr.open_zarr(retro_zarr)['rivid']) as ds:
         
-        cl.log_message('RUNNING', f'Appending to zarr: {ds.time[0].values} to {ds.time[-1].values}')
+        cl.log_message('RUNNING', f'Appending to zarr: {np.datetime_as_string(ds.time[0].values, unit='h')} to {np.datetime_as_string(ds.time[-1].values, unit='h')}')
         append_week(ds, retro_zarr)
 
 if __name__ == '__main__':
@@ -403,9 +403,14 @@ if __name__ == '__main__':
                     local_file.write(s3_file.read())
 
             # Check that the time in the nc will accord with the retrospective zarr
-            first_era_time = xr.open_dataset(local_era5_nc)['time'][0].values
+            era_time = xr.open_dataset(local_era5_nc)['time'].values
+            first_era_time = era_time[0].values
             last_retro_time = xr.open_zarr(local_zarr)['time'][-1].values
             cl.add_last_date(last_retro_time)
+            try:
+                cl.add_time_period(era_time)
+            except:
+                logging.warning(f"Could not add time period to cloud log for {era_time}")
             if last_retro_time + np.timedelta64(1, 'D') != first_era_time:
                 raise ValueError(f"Time mismatch between {local_era5_nc} and {local_zarr}: got {first_era_time} and {last_retro_time} respectively (the era file should be 1 day behind the zarr). Please check the time in the .nc file and the zarr.")
             

@@ -292,6 +292,6 @@ if __name__ == "__main__":
 
         ec2 = boto3.client('ec2', region_name = "us-west-2")
         ec2.start_instances(InstanceIds=[other_instance])
-        cl.log_message('Pass')
+        cl.log_message('FINISHED')
     except Exception as e:
-        cl.log_message('Fail', traceback.format_exc())
+        cl.log_message('FAIL', traceback.format_exc())

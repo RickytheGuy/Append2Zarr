@@ -5,16 +5,21 @@ Using two EC2 instances, download ERA5 data on one, and use that data on the oth
 ### Create your EC2 Role
 1. Go to the IAM service page, and click on "Roles" in the navigation pane.
 2. Click the "Create role" button.
-3. Under "Trusted entity type", select "AWS Service". Under "Use case", select "EC2". CLick "Next"
-4. Search and select "AmazonS3FullAccess" and "AmazonEC2FullAccess". CLick "Next"
+3. Under "Trusted entity type", select "AWS Service". Under "Use case", select "EC2". Click "Next"
+4. Search and select "AmazonS3FullAccess", "AmazonEC2FullAccess", and "CloudWatchLogsFullAccess". Click "Next"
 5. Give your role a name. Click "Create role"
 
 ### Create your Lambda Role
 1. Go to the IAM service page, and click on "Roles" in the navigation pane.
 2. Click the "Create role" button.
-3. Under "Trusted entity type", select "AWS Service". Under "Use case", select "Lambda". CLick "Next"
-4. Search and select "AmazonS3FullAccess" and "AmazonEC2FullAccess". CLick "Next"
+3. Under "Trusted entity type", select "AWS Service". Under "Use case", select "Lambda". Click "Next"
+4. Search and select "AmazonS3FullAccess" and "AmazonEC2FullAccess". Click "Next"
 5. Give your role a name. Click "Create role"
+
+### Setup CloudWatch
+1. Go to the AWS Cloudwatch service page and select "Log groups" in the navigation pane. Click "Create log group" in the top right corner
+2. Edit your group settings as you desire and click "Create"
+3. With your new log group, click the "Create log stream" button. Give it a name. You may make multiple log streams for each EC2 instance. You will need to group name and stream name when filling the .profile files for each instance.
 
 ### Launch the computation instance
 1. On the "Launch an instance" page, select Ubuntu as the OS in "Application and OS Images (Amazon Machine Image)". 
@@ -59,7 +64,7 @@ region=YOUR_REGION
 
 ### Setup the downloader instance
 1. Use SSH to connect to your instance (it should automatically start after launching). The command should look something like "ssh -i PATH/TO/KEY-PAIR.PEM ubuntu@IP-ADDRESS". The IP address can be viewed in the Instances page of the EC2 service.
-2. Run the following code in the EC2 isntance's terminal:
+2. Run the following code in the EC2 instance's terminal:
 ``` 
 cd $HOME
 sudo apt-get update
@@ -76,8 +81,16 @@ aws_secret_access_key=YOUR_KEY
 region=YOUR_REGION
 ```
 5. Fill out the .profile file found in retrospective-update/downloader_scripts/
-6. The downloader instance needs a .cdsapirc file located either in the home directory or in the retrospective-update/downloader_scripts/ directory. Get this file from [here](https://cds.climate.copernicus.eu/user/186014)
+6. The downloader instance needs a .cdsapirc file located in the retrospective-update/downloader_scripts/ directory. Get this file from [here](https://cds.climate.copernicus.eu/user/186014)
 7. Stop the instance.
+
+### Add user data
+1. With both instances stopped, do the following for each instance:
+    - Select the instance, click "Actions", go to "Instance settings", and select "Edit user data"
+    - Upload or copy-and-paste the coresponding *_user_data.txt from this repo to the Edit user data page. 
+    - Save
+
+    Everytime the instance starts up, the user data script will be run. If you need to access the instance, comment out the last two lines of code of the user data scripts that run python and shutdown the instance. 
 
 ### Create a lambda function
 1. Go to the AWS Lambda servicec page. Click the "Create function" button.
@@ -93,5 +106,15 @@ def lambda_handler(event, context):
     ec2 = boto3.client('ec2', region_name=region)
     ec2.start_instances(InstanceIds=["INSERT_DOWNLOAD_EC2_ID_HERE"])
 ```
-4. In the configuration tab, under General Configuration, edit the Memory and Ephemeral storage to be the lowest value (128 MB & 512 MB), and set the Timeout to be 0 min, 10 sec.
+Make sure you click the "Deploy" button. Note that region should not include letters after the number (i.e. us-west-2 instead of us-west-2a)
+4. In the configuration tab, set the Timeout to be 0 min, 10 sec.
+
+## Execution
+You may test your lambda function to ensure that every step of this process succeeds. When you have fixed any potential errors and are ready to schedule this process, do the following:
+
+1. Go the the Lamda function you created in the previous step. Click the "Add trigger" button
+2. Select "Eventbridge" from the dropdown. Select "Create a new rule". Select "Schedule expression". Enter a cron espression (for example, to set the lambda function to go off at 12:00 AM on Sunday, enter "cron(0 0 ? * SUN *)")
+3. Hit "Add", and you're done!
+
+
 
