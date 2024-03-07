@@ -299,7 +299,8 @@ def check_installations() -> None:
 
 def main(working_dir: str,
          retro_zarr: str,
-         nc: str) -> None:
+         nc: str,
+         cl: CloudLog) -> None:
     """
     Assumes docker is installed and this command was run: docker pull chdavid/rapid.
     Assumes AWS CLI and s5cmd are likewise installed. 
@@ -323,6 +324,7 @@ def main(working_dir: str,
     # For inflows files and multiprocess, for each 1GB of runoff data, we need ~ 6GB for peak memory consumption. Otherwise, some m3 files will never be written and no error is raised
     processes = min(multiprocessing.cpu_count(), round(psutil.virtual_memory().total * 0.8 /  (os.path.getsize(nc) * 6)))
     logging.info(f"Using {processes} processes for inflows")
+    cl.log_message('RUNNING', f"Using {processes} processes for inflows")
     worker_lists = [config_vpu_dirs[i:i+processes] for i in range(0, len(config_vpu_dirs), processes)]
     with multiprocessing.Pool(processes) as pool:
         pool.starmap(inflow_and_namelist, [(working_dir, os.path.join(working_dir, 'data','namelists'), nc, w) for w in worker_lists])
@@ -332,7 +334,8 @@ def main(working_dir: str,
 
     # Run rapid
     logging.info('Running rapid')
-    rapid_result = subprocess.run([f'sudo docker run --rm --name rapid --mount type=bind,source={os.path.join(working_dir, 'data')},target=/mnt/data \
+    cl.log_message('RUNNING', 'Running RAPID')
+    rapid_result = subprocess.run([f'sudo docker run --rm --name rapid --mount type=bind,source={os.path.join(working_dir, "data")},target=/mnt/data \
                         chdavid/rapid python3 /mnt/data/runrapid.py --rapidexec /home/rapid/src/rapid --namelistsdir /mnt/data/namelists'],
                         shell=True,
                         capture_output=True,
@@ -352,7 +355,8 @@ def main(working_dir: str,
                         combine='nested', 
                         concat_dim='rivid',
                         preprocess=drop_coords,).reindex(rivid=xr.open_zarr(retro_zarr)['rivid']) as ds:
-
+        
+        cl.log_message('RUNNING', f'Appending to zarr: {ds.time[0].values} to {ds.time[-1].values}')
         append_week(ds, retro_zarr)
 
 if __name__ == '__main__':
@@ -389,7 +393,9 @@ if __name__ == '__main__':
 
         ncs = sorted(s3.glob(f"{era_dir}/*.nc"), key=date_sort) # Sorted, so that we append correctly by date
         if not ncs:
+            logging.error(f"Could not find any .nc files in {era_dir}")
             raise FileNotFoundError(f"Could not find any .nc files in {era_dir}")
+        cl.log_message('START', f"Appending {len(ncs)} ERA5 files to {local_zarr}")
         for i, era_nc in enumerate(ncs):
             with s3.open(era_nc, 'rb') as s3_file:
                 local_era5_nc = os.path.basename(era_nc)
@@ -403,7 +409,7 @@ if __name__ == '__main__':
             if last_retro_time + np.timedelta64(1, 'D') != first_era_time:
                 raise ValueError(f"Time mismatch between {local_era5_nc} and {local_zarr}: got {first_era_time} and {last_retro_time} respectively (the era file should be 1 day behind the zarr). Please check the time in the .nc file and the zarr.")
             
-            main(working_directory, local_zarr, local_era5_nc)
+            main(working_directory, local_zarr, local_era5_nc, cl)
             if i + 1 < len(ncs): # Log each time we will run again, except for the last time
                 cl.log_message('RUNNING AGAIN')
             os.remove(local_era5_nc)
@@ -413,7 +419,7 @@ if __name__ == '__main__':
         # At last, sync to S3
         sync_local_to_s3(local_zarr, s3_zarr)
         cleanup(working_directory, qfinal_dir)
-        cl.log_message('COMPLETE', 'Finished')
+        cl.log_message('COMPLETE')
     except Exception as e:
         error = traceback.format_exc()
         logging.error(error)

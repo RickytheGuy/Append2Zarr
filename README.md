@@ -2,10 +2,17 @@
 Using two EC2 instances, download ERA5 data on one, and use that data on the other to run RAPID and append the output data to a zarr file on an Amazon S3 Bucket.
 
 ## Setup
-### Create your IAM role
+### Create your EC2 Role
 1. Go to the IAM service page, and click on "Roles" in the navigation pane.
 2. Click the "Create role" button.
 3. Under "Trusted entity type", select "AWS Service". Under "Use case", select "EC2". CLick "Next"
+4. Search and select "AmazonS3FullAccess" and "AmazonEC2FullAccess". CLick "Next"
+5. Give your role a name. Click "Create role"
+
+### Create your Lambda Role
+1. Go to the IAM service page, and click on "Roles" in the navigation pane.
+2. Click the "Create role" button.
+3. Under "Trusted entity type", select "AWS Service". Under "Use case", select "Lambda". CLick "Next"
 4. Search and select "AmazonS3FullAccess" and "AmazonEC2FullAccess". CLick "Next"
 5. Give your role a name. Click "Create role"
 
@@ -25,10 +32,9 @@ Using two EC2 instances, download ERA5 data on one, and use that data on the oth
 cd $HOME
 sudo apt-get update
 sudo apt-get install git
-git clone https://github.com/RickytheGuy/retrospective-update/archive/refs/heads/main.zip
-mv retrospective-update-main retrospective-update
+git clone https://github.com/RickytheGuy/retrospective-update.git
 sudo chmod +x retrospective-update/computation_scripts/install.sh
-retrospective-update/computation_scripts/install.sh
+source retrospective-update/computation_scripts/install.sh
 ```
 3. Create a 1000GB volume (read how to do that [here](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-creating-volume.html)). Setup the instance to automatically attatch that volume on each startup (instructions under "Automatically mount an attached volume after reboot" [here](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-using-volumes.html)). Remember the mount location you choose (we recommend simply using "/mnt"). Attach the volume.
 4. Add a copy of the retrospective zarr to the volume. 
@@ -58,10 +64,9 @@ region=YOUR_REGION
 cd $HOME
 sudo apt-get update
 sudo apt-get install git
-git clone https://github.com/RickytheGuy/retrospective-update/archive/refs/heads/main.zip
-mv retrospective-update-main retrospective-update
+git clone https://github.com/RickytheGuy/retrospective-update.git
 sudo chmod +x retrospective-update/downloader_scripts/install.sh
-retrospective-update/downloader_scripts/install.sh
+source retrospective-update/downloader_scripts/install.sh
 ```
 3. Create a 100GB volume (read how to do that [here](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-creating-volume.html)). Setup the instance to automatically attatch that volume on each startup (instructions under "Automatically mount an attached volume after reboot" [here](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-using-volumes.html)). Remember the mount location you choose (we recommend simply using "/mnt")
 4. Create a file in the ".aws" folder called "credentials". Place into this file your aws access key id and secret access key:
