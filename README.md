@@ -95,7 +95,7 @@ def lambda_handler(event, context):
     ec2.start_instances(InstanceIds=["INSERT_DOWNLOAD_EC2_ID_HERE"])
 ```
    Make sure you click the "Deploy" button. Note that the region should not include letters after the number (i.e., us-west-2 instead of us-west-2a).
-4. In the configuration tab, set the timeout to be 0 min, 10 sec.
+   4. In the configuration tab, set the timeout to be 0 min, 10 sec.
 
 ## Execution
 You may test your lambda function to ensure that every step of this process succeeds. When you have fixed any potential errors and are ready to schedule this process, do the following:
